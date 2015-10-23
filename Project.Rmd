@@ -1,0 +1,128 @@
+```{r loadpackage, echo=FALSE, message=FALSE, warning=FALSE}
+library(caret)
+library(rpart)
+library(rpart.plot)
+library(randomForest)
+library(corrplot)
+library(e1071)
+```
+### Practical Machine Learning - Project Report
+*Date: 22 October 2015*
+
+#### Project Introduction
+Devices such as *Jawbone Up*, *Nike Fuelband*, and *Fitbit* are getting increasingly popular due to its ability to track personal activities at a relatively inexpensive price. Users generally use such devices to quantify how *much* of a particular acitvity they do, but they rarely quantity **how well** they do it. As such, the goal of this project is to predict the manner in which they did the exercise.
+
+For the purpose of this project, we will be using data from this source: [http://groupware.les.inf.puc-rio.br/har](http://groupware.les.inf.puc-rio.br/har). The data source consists of data from accelerometers on the belt, forearm, arm, and dumbbell of 6 participants. The participants were asked to perform barbell lifts correctly and incorrectly in 5 different ways:
+
+1. Class A: Exactly according to specifications (the correct manner of lifting the dumbbell)
+
+2. Class B: Throwing the elbows to the front
+
+3. Class C: Lifting the dumbbell only halfway
+
+4. Class D: Lowering the dumbbell only halfway
+
+5. Class E: Throwing the hips to the front
+
+Each participant was asked to perform a set of 10 repetitions.
+
+#### Downloading and Reading the Data
+``` {r downloaddata}
+trainingdatadownload <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+testdatadownload <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+trainingdata <- "./training.csv"
+testdata <- "./test.csv"
+if (!file.exists(trainingdata)) {
+    download.file(trainingdatadownload,destfile=trainingdata,method="curl")
+} ## Checks if training data file already exists in working directory
+if (!file.exists(testdata)) {
+    download.file(testdatadownload,destfile=testdata,method="curl")
+} ## Checks if test data file already exists in working directory
+```
+``` {r readdata}
+trainingset <- read.csv("./training.csv")
+testset <- read.csv("./test.csv")
+```
+
+Let's take a look at the datasets.
+``` {r datasummary}
+dim(trainingset)
+summary(trainingset$classe)
+dim(testset)
+```
+
+As we can see, the training data set contains 19,622 observations and 160 variables, of which we are most concerned of the `classe` variable. The `classe` variable will be the outcome that we want to predict.
+
+#### Cleaning the Data
+We start cleaning both of the data sets by removing variables that contain *NA* values.
+``` {r missingvariables}
+trainingnoNA <- trainingset[,colSums(is.na(trainingset))==0]
+testnoNA <- testset[,colSums(is.na(testset))==0]
+```
+
+Next, we remove columns that do not contribute significantly to the accelerometer measurements, i.e., variables that are not concerned with belt, forearm, arm, or dumbbell.
+``` {r removecolumns}
+classevariable <- trainingnoNA$classe ## We first create a classe object based on the values extracted from the training data set so that we can add it back to the tidied dataset later.
+training.removevariables <- grepl("^X|timestamp|window",names(trainingnoNA)) ## Get the column numbers of the variables which we want to remove
+trainingremoved <- trainingnoNA[,!training.removevariables]
+trainingtidied <- trainingremoved[,sapply(trainingremoved,is.numeric)] 
+trainingtidied$classe <- classevariable ## Add in the classe variable
+test.removevariables <- grepl("^X|timestamp|window",names(testnoNA)) ## Do the same thing for the test set
+testremoved <- testnoNA[,!test.removevariables]
+testtidied <- testremoved[,sapply(testremoved,is.numeric)]
+```
+
+Now, let's take a look again at the tidied datasets.
+``` {r tidieddatasummary}
+dim(trainingtidied)
+summary(trainingtidied$classe)
+dim(testtidied)
+```
+The training data set now contains 19,622 observations and 53 variables, and the `classe` variable remains.
+
+#### Modeling the Data
+To begin our prediction, we would first need to slice our training set into 70% (pure training data set) and 30% (validation data set), which the 30% validation data set will be used for cross-validation in the later part of our analysis.
+
+``` {r slicedata}
+set.seed(8090) ## Set the seed to ensure reproducibility
+inTrain <- createDataPartition(trainingtidied$classe,p=0.70,list=F)
+trainData <- trainingtidied[inTrain,]
+testData <- trainingtidied[-inTrain,]
+```
+
+We will then fit a predictive model for activity recognition. We will be using **Random Forest** algorithm here because it selects important variables and is able to correct for decision trees' habit of overfitting to their training set. **5-fold cross validation** is used to apply the algorithm.
+
+``` {r fitmodel}
+control <- trainControl(method="cv",5)
+model <- train(classe~.,data=trainData,method="rf",trControl=control,ntree=250)
+model
+```
+
+*Please refer to `Figure 1` in Appendix for the decision tree visualization.*
+
+Next, we will perform cross validation and estimate the peformance of the model on the validation data set.
+``` {r estimateperformance}
+predict <- predict(model, testData)
+confusionMatrix(testData$classe, predict)
+accuracy <- postResample(predict,testData$classe)
+outofsampleerror <- 1-as.numeric(confusionMatrix(testData$classe,predict)$overall[1])
+
+accuracy
+outofsampleerror
+````
+
+From the results, we can see that the estimated accuracy of the model is **99.37%** and the estimated out-of-sample error is **0.63%**.
+
+#### Predicting Test Data Set
+Last but not least, we will apply the model to the original testing data set.
+``` {r testprediction}
+finalresult <- predict(model, testtidied[,-length(names(testtidied))])
+finalresult
+```
+
+#### Appendix
+##### Figure 1 - Decision Tree Visusalization
+``` {r decisiontree}
+treeModel <- rpart(classe~.,data=trainData,method="class")
+prp(treeModel)
+```
